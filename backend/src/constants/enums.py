@@ -1,3 +1,5 @@
 ROLES=('admin','operator','viewer')
 STATUSES=('queued','running','completed','failed')
 OPERATORS=('scan','filter','hash_join','group')
+VERDICTS=('identical','result_equal_steps_unproven','diverged')
+STEP_KINDS=('identical','changed','unproven','added','removed','conflict')

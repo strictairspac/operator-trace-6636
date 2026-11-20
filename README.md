@@ -5,7 +5,9 @@
 ## 场景与模块
 上游是设备可靠性课程的采样文件、传感器表和分析需求。过去在白板画算子、手动算中间行数，再把截图发给助教；重复键丢失、空结果误判、输入版本变化后无法复现实验是三个痛点。本站保存数据集与有界计划 DSL，worker 真执行并保存不可变快照/逐步摘要，下游讲师和同学只读复查。
 
-数据集录入/编辑、算子计划编排、执行队列、算子剖面/JSON导出四个业务页面；管理员有审计。三个实体 datasets / plans / traces 均贯穿数据库、模型、schema、service、controller、route、前端api/store/page。
+数据集录入/编辑、算子计划编排、执行队列、算子剖面/JSON导出、复查对账五个业务页面；管理员有审计。四个实体 datasets / plans / traces / reviews 均贯穿数据库、模型、schema、service、controller、route、前端api/store/page。
+
+复查对账（reviews）把一次新执行与选定完成的基线快照逐算子核对：基线只能来自同一数据集，双方各按受理快照核对；重复行按重数、空结果和六位精度沿用执行规则。算子、参数与输入摘要全部一致的步骤判为相同并复用，参数调整、上游变化、增删或摘要冲突分别标出，无法证明的步骤不硬配。新执行失败或对账中断可续跑，已确认步骤从检查点跳过、不重复计算；只有全部步骤和新执行结果都核齐才原子发布结论，失败不留半份结果。页面与导出显示首个分歧、未匹配步骤和回退指标。
 
 ## 启动
 ```sh
@@ -31,14 +33,15 @@ docker compose exec -T backend python -m scripts.seed_demo
 5. 09:20 提交 `shift-20261117`，观察worker排队到完成。
 6. 09:25 逐算子复查输入/输出行数与结果预览。
 7. 09:30 导出 `trace-<id>.json`，viewer只读验证。
-8. 10:00 admin 查看审计。
+8. 09:35 以「基线快照 · 松原日班温升采样」为基线提交复查，查看首个分歧与回退指标并导出 `review-<id>.json`。
+9. 10:00 admin 查看审计。
 
-seed三账号、三个数据集（240行日班、空数据、重复右键）、三个对应计划。固定公式，无随机数；自然键补缺不覆盖用户修改，连续运行不新增。
+seed三账号、三个数据集（240行日班、空数据、重复右键）、三个对应计划，外加一条已完成基线执行。固定公式，无随机数；自然键补缺不覆盖用户修改，连续运行不新增。
 
 ## 算法与边界
 这是教学内核模型，不是PostgreSQL执行器剖面。PostgreSQL真实保存业务元数据；Python worker真实计算表扫描、数值/相等筛选、构建哈希桶与内连接、Decimal累积分组。右表重复键保留倍数，空集合输出空集合。分组avg/sum保留6位小数，输出按规范JSON排序，SHA-256使用排序key紧凑JSON UTF-8；相同输入和计划结果摘要相同。每步输出输入/输出行数、耗时、明细、前5行与checksum。scan 的 input_rows=0 表示从源读取，detail.scanned_rows为扫描源行数；row_visits是扫描/过滤/哈希构建与探测/聚合各步逻辑行访问总和，不代表物理I/O。
 
-DSL最多6步，首步仅scan readings；filter eq/gte/lte；hash_join仅readings.sensor_id=sensors.sensor_id且最多一次；group仅value的count/sum/avg。禁止eval、任意代码和任意SQL。最多100传感器、2000采样、10000连接输出行；超限失败，不保存部分结果。JSON非法、字段错误、非法算子、孤立引用、重复名有可恢复错误。任务使用Redis简单单消费者，进程崩溃后的running任务不自动重试，保留供人工复查后新建任务。
+DSL最多6步，首步仅scan readings；filter eq/gte/lte；hash_join仅readings.sensor_id=sensors.sensor_id且最多一次；group仅value的count/sum/avg。禁止eval、任意代码和任意SQL。最多100传感器、2000采样、10000连接输出行；超限失败，不保存部分结果。JSON非法、字段错误、非法算子、孤立引用、重复名有可恢复错误。任务使用Redis简单单消费者（`operator-traces` 与 `operator-reviews` 两个队列），进程崩溃后的running任务不自动重试，保留供人工复查后新建任务；复查另有检查点续跑，重试不重复计算已确认步骤。
 
 ## 技术、目录与本地开发
 Python3.11 / FastAPI / SQLAlchemy / psycopg / Redis / PostgreSQL16；原生 HTML/CSS/JS ES modules / nginx1.27。五服务frontend/backend/worker/db/redis均健康探针，命名卷数据库/Redis/共享产物。DB/Redis健康后启动backend，backend健康后启worker/frontend。

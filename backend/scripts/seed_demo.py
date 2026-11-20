@@ -3,6 +3,7 @@ from src.models.identity import User,Audit
 from src.models.dataset import Dataset
 from src.models.plan import Plan
 from src.models.trace import Trace
+from src.models.review import Review
 from src.utils.security import hash_password
 DEFAULT_STEPS=[{'op':'scan','source':'readings'},{'op':'filter','field':'value','compare':'gte','value':50},{'op':'hash_join','right':'sensors','left_key':'sensor_id','right_key':'sensor_id'},{'op':'group','keys':['zone'],'measure':'value','aggregate':'avg'}]
 def seed():
@@ -19,5 +20,13 @@ def seed():
   for i,(name,_,_,_) in enumerate(seeds):
    pname=['过滤-连接-分组基线','空输入管线','重复键内连接'][i]
    if not s.query(Plan).filter_by(name=pname).first():s.add(Plan(name=pname,dataset_id=s.query(Dataset).filter_by(name=name).one().id,steps=DEFAULT_STEPS,note='受限DSL，Python算子真实执行'))
-  s.commit();counts={m.__tablename__:s.query(m).count() for m in (User,Dataset,Plan,Trace)};print(counts);return counts
+  s.flush()
+  baseline_name='基线快照 · 松原日班温升采样'
+  if not s.query(Trace).filter_by(name=baseline_name).first():
+   from src.services.operators import execute
+   dataset=s.query(Dataset).filter_by(name=seeds[0][0]).one();plan=s.query(Plan).filter_by(name='过滤-连接-分组基线').one()
+   snapshot={'dataset':{'id':dataset.id,'name':dataset.name,'description':dataset.description,'sensors':dataset.sensors,'readings':dataset.readings},
+    'plan':{'id':plan.id,'name':plan.name,'dataset_id':plan.dataset_id,'steps':plan.steps,'note':plan.note}}
+   s.add(Trace(name=baseline_name,plan_id=plan.id,dataset_id=dataset.id,status='completed',snapshot=snapshot,result=execute(snapshot['dataset'],plan.steps)))
+  s.commit();counts={m.__tablename__:s.query(m).count() for m in (User,Dataset,Plan,Trace,Review)};print(counts);return counts
 if __name__=='__main__':seed()

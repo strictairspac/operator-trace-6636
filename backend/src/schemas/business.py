@@ -28,3 +28,7 @@ class PlanInput(BaseModel):
 class TraceInput(BaseModel):
  name:str=Field(min_length=2,max_length=120)
  plan_id:int
+class ReviewInput(BaseModel):
+ name:str=Field(min_length=2,max_length=120)
+ baseline_trace_id:int
+ plan_id:int

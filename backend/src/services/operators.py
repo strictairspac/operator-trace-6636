@@ -33,9 +33,20 @@ def validate_steps(steps):
  return steps
 
 def checksum(rows):return hashlib.sha256(json.dumps(rows,sort_keys=True,ensure_ascii=False,separators=(',',':')).encode()).hexdigest()
-def execute(dataset,steps):
- validate_steps(steps);rows=[];trace=[];total_started=time.perf_counter();reads=0
- for step in steps:
+def execute(dataset,steps,resume=None,on_step=None):
+ """Run the bounded plan. resume={'completed':n,'rows':[...],'operators':[...],'row_visits':n,'elapsed_ms':x}
+ skips the first n steps so a retried review never recomputes confirmed steps."""
+ validate_steps(steps);total_started=time.perf_counter()
+ if resume:
+  start=resume.get('completed',0)
+  if not isinstance(start,int) or not 0<=start<=len(steps):raise ValueError('续跑检查点无效')
+  rows=[dict(r) for r in resume.get('rows',[])];trace=list(resume.get('operators',[]));reads=resume.get('row_visits',0)
+  if len(trace)!=start:raise ValueError('续跑检查点与已完成步骤不一致')
+  prior_ms=resume.get('elapsed_ms',0)
+ else:
+  start=0;rows=[];trace=[];reads=0;prior_ms=0
+ for index,step in enumerate(steps):
+  if index<start:continue
   before=len(rows);started=time.perf_counter();detail={}
   if step['op']=='scan':
    rows=[dict(r) for r in dataset['readings']];reads+=len(rows);detail={'source':'readings','scanned_rows':len(rows)}
@@ -66,4 +77,5 @@ def execute(dataset,steps):
     rows.append({**dict(zip(keys,key)),agg:round(value,6) if isinstance(value,float) else value})
    rows.sort(key=lambda r:json.dumps(r,sort_keys=True,ensure_ascii=False));detail={'groups':len(rows),'aggregate':agg,'accumulator':'decimal from source string; rounded 6 decimals'}
   trace.append({'op':step['op'],'input_rows':before,'output_rows':len(rows),'duration_ms':round((time.perf_counter()-started)*1000,4),'detail':detail,'checksum':checksum(rows),'preview':rows[:5]})
- return {'operators':trace,'output':rows,'output_rows':len(rows),'checksum':checksum(rows),'row_visits':reads,'duration_ms':round((time.perf_counter()-total_started)*1000,4),'limits':{'max_readings':2000,'max_sensors':100,'max_join_rows':10000,'max_stages':6},'model':'Python teaching scan/filter/hash join/group engine; PostgreSQL persists business metadata only'}
+  if on_step:on_step(index,f'operator {index+1}/{len(steps)} {step["op"]} done',{'completed':index+1,'rows':rows,'operators':trace,'row_visits':reads,'elapsed_ms':round(prior_ms+(time.perf_counter()-total_started)*1000,4)})
+ return {'operators':trace,'output':rows,'output_rows':len(rows),'checksum':checksum(rows),'row_visits':reads,'duration_ms':round(prior_ms+(time.perf_counter()-total_started)*1000,4),'limits':{'max_readings':2000,'max_sensors':100,'max_join_rows':10000,'max_stages':6},'model':'Python teaching scan/filter/hash join/group engine; PostgreSQL persists business metadata only'}
